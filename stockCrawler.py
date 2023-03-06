@@ -10,6 +10,7 @@ import time
 from fake_useragent import UserAgent
 from enum import Enum
 import os
+import argparse
 
 
 class QueryType(Enum):
@@ -20,10 +21,13 @@ class QueryType(Enum):
 
         
 class Stock():
-    def __init__(self):
-        self.queryType = QueryType.listed  # 設定要跑(加權，上市，興櫃)
-        self.startDate = "2022-01-01"
-        self.choosenStock = ['1301', '2385', '2420', '3030', '9933']
+    def __init__(self, args):
+        self.queryType = QueryType[args['queryType']]  # 設定要跑(加權，上市，興櫃)
+        self.initOrFill = args['initOrFill'] # fill
+        self.startDate = args['startDate'] #"2022-01-01"
+        self.endDate = args['endDate'] #now
+        self.choosenStock = args['choosenStock'] # ['1301', '2385', '2420', '3030', '9933']
+        self.saveFileName = args['saveFileName'] # stock
         self.choosenStockDK = []
         
         user_agent = UserAgent()
@@ -50,18 +54,20 @@ class Stock():
         # asda = self.craw_one_day('20221223')
         # print(asda)
 
+        if self.initOrFill == 'init':
+            self.runToCrawler()
+        else:
+            self.getRestStock()
         
-        # self.runToCrawler()
-        self.getRestStock()
     
     def getRestStock(self):
         '''補齊沒有的股票用'''
         dirpath = os.getcwd()
         print("dirpath = ", dirpath, "\n")
 
-        output_path = os.path.join(dirpath,'stock.csv')
+        output_path = os.path.join(dirpath, str(self.saveFileName) + '.csv')
         print(output_path,"\n")
-        readDf = pd.read_csv('stock.csv')
+        readDf = pd.read_csv(str(self.saveFileName) + '.csv')
         startDateStr = readDf.iat[-1, 0] # 取得文件中最後一筆的日期
         # print(dateStr)
         startDateStr = Tools().transform_date(startDateStr) # 將民國轉西元
@@ -90,43 +96,46 @@ class Stock():
                     for i in range(len(readDf.columns) - len(temp)):
                         temp = np.append(temp, ' ')
                 readDf.loc[len(readDf.index)] = temp
-                readDf.to_csv('stock.csv', encoding='utf_8_sig', index=False)
+                readDf.to_csv(str(self.saveFileName) + '.csv', encoding='utf_8_sig', index=False)
+                time.sleep(5)
            
             # readDf[dt] = self.craw_one_day(dt)
     
     def runToCrawler(self):
         '''初始建檔案用的，因為過多資料，不能一天一天撈，使用不同的API'''
         stocks = [2420, 3030, 9933]#[1301, 2385, 2420, 3030, 9933]
-        #7584興櫃還沒寫
 
         if self.queryType == QueryType.TWII:
-            df = self.craw_stock([], self.startDate)
+            df = self.craw_stock([], self.startDate, self.endDate)
             df.set_index("日期", inplace=True)
-            readDf = pd.read_csv('stock.csv')
+            readDf = pd.read_csv(str(self.saveFileName) + '.csv')
             df = df.drop(['開盤指數', '最高指數', '最低指數'], axis=1)
             readDf['加權指數'] = df['收盤指數'].to_numpy()
-            readDf.to_csv('stock.csv', encoding='utf_8_sig', index=False)
+            readDf.to_csv(str(self.saveFileName) + '.csv', encoding='utf_8_sig', index=False)
         elif self.queryType == QueryType.listed:
-            for index, stock in enumerate(stocks):
-                df = self.craw_stock(stock, self.startDate)
+            for index, stock in enumerate(self.choosenStock):
+                df = self.craw_stock(stock, self.startDate, self.endDate)
                 df.set_index("日期", inplace=True)
                 # 如果是第一次跑，需要跑這個，因為需要第一行有日期
-                # if index == 0:
-                #     df = df.drop(['成交股數', '成交金額', '開盤價', '最高價', '最低價', '漲跌價差', '成交筆數'], axis=1)
-                #     df.to_csv('stock.csv', encoding='utf_8_sig')
-                # else:
-                readDf = pd.read_csv('stock.csv')
-                df = df.drop(['成交股數', '成交金額', '開盤價', '最高價',
-                            '最低價', '漲跌價差', '成交筆數'], axis=1)
-                readDf[stock] = df['收盤價'].to_numpy()
-                readDf.to_csv('stock1230.csv', encoding='utf_8_sig', index=False)
+                if index == 0:
+                    df = df.drop(['成交股數', '成交金額', '開盤價', '最高價', '最低價', '漲跌價差', '成交筆數'], axis=1)
+                    df.to_csv(str(self.saveFileName) + '.csv', encoding='utf_8_sig')
+                else:
+                    readDf = pd.read_csv(str(self.saveFileName) + '.csv')
+                    df = df.drop(['成交股數', '成交金額', '開盤價', '最高價',
+                                '最低價', '漲跌價差', '成交筆數'], axis=1)
+                    readDf[stock] = df['收盤價'].to_numpy()
+                    readDf.to_csv(str(self.saveFileName) + '.csv', encoding='utf_8_sig', index=False)
 
-    def craw_stock(self, stock_number, start_month):
+    def craw_stock(self, stock_number, start_month, end_month):
         b_month = date(*[int(x) for x in start_month.split('-')])
         print(b_month)
         now = datetime.datetime.now().strftime("%Y-%m-%d")  # 取得現在時間
         print(now)
-        e_month = date(*[int(x) for x in now.split('-')])
+        if end_month == 'now':
+            e_month = date(*[int(x) for x in now.split('-')])
+        else:
+            e_month = date(*[int(x) for x in end_month.split('-')])
         print(e_month)
 
         result = pd.DataFrame()
@@ -195,7 +204,8 @@ class Stock():
         group = df.groupby('證券代號') # 資料做分組方便查找
         # tempDF = pd.DataFrame([], columns = resJson['fields9'])
         tempDF = pd.DataFrame()
-        for stock in self.choosenStock:
+        list_string = map(str, self.choosenStock)
+        for stock in list_string:
             temp = group.get_group(stock) # 括弧內放入要取出的類別
             tempDF = pd.concat([tempDF, temp], axis = 0)
         numpyDF = tempDF['收盤價'].to_numpy()
@@ -227,5 +237,21 @@ class Tools():
         y, m, d = date.split('/')
         return str(int(y)+1911) + '/' + m  + '/' + d
 
+
+def parser_loader():
+    parser = argparse.ArgumentParser(description = 'Stock Crawler')
+
+    parser.add_argument('--initOrFill', type = str, default = 'fill')
+    parser.add_argument('--choosenStock', nargs='+', type=int, default=[2330])
+    parser.add_argument('--startDate', type=str, default = '2023-01-01')
+    parser.add_argument('--endDate', type=str, default = 'now')
+    parser.add_argument('--saveFileName', type=str, default = 'testStock')
+    parser.add_argument('--queryType', type=str, default = 'listed')
+    return parser
+
 if __name__ == "__main__":  
-    Stock()
+    parser = parser_loader()
+    args = vars(parser.parse_args())
+    print(args)
+
+    Stock(args)
